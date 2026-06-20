@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 logs/
 .venv
+venv/
 ckpts/
 .vscode/
 *.db
@@ -13,3 +14,13 @@ submissions/
 backups/
 tests/
 training/
+
+# Custom project ignores
+*.zip
+*.csv
+*.xlsx
+*.pth
+*.log
+submission/
+agent/agent.py
+agent/agent.zip
