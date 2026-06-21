@@ -1,0 +1,66 @@
+sequenceDiagram
+    autonumber
+    participant Env as Engine (BomberEnv)
+    participant Ag as Agent.act()
+    participant DM as build_time_layered_danger_map() [Bước 0]
+    participant SL as get_safe_actions() [Bước 8]
+    participant GT as Game Theory Layer [Bước 1-4]
+    participant Enc as encode_obs_enriched() [Bước 5]
+    participant DQN as DQNModel.forward()
+    participant FSM as get_phase_weights() [Bước 6]
+    participant EX as expectimax_filter() [Bước 7]
+
+    Env->>Ag: act(obs)  {map, players, bombs}
+    Note over Ag: self.step += 1
+
+    rect rgb(235, 240, 255)
+    Note right of Ag: Bước 0 — Danger Map nền
+    Ag->>DM: build_time_layered_danger_map(obs)
+    Note over DM: sort bom theo timer<br/>resolve chain reaction<br/>fill tick nổ từng ô
+    DM-->>Ag: danger_map (13×13, tick nổ / 999)
+    end
+
+    rect rgb(255, 235, 235)
+    Note right of Ag: Bước 8 — Safety Layer (override tuyệt đối)
+    Ag->>SL: get_safe_actions(obs, danger_map)
+    Note over SL: loại action vào tick<=1<br/>PLACE_BOMB cần _can_escape_after_placing()
+    SL-->>Ag: safe_actions
+    alt safe_actions == [0]
+        Ag-->>Env: return 0 (STOP) — thoát sớm, bỏ qua RL + GT
+    end
+    end
+
+    rect rgb(235, 255, 235)
+    Note right of Ag: Bước 1-4 — Game Theory maps
+    Ag->>GT: compute_utility_map(obs, danger_map)
+    GT-->>Ag: utility_map (stratified penalty + LOS check)
+    Ag->>GT: compute_enemy_prob_map(obs, k=3)
+    GT-->>Ag: enemy_prob_map (Markov chain)
+    Ag->>GT: compute_bomb_attack_score(obs, enemy_prob_map)
+    Note over GT: guard CPU: skip nếu không có địch ≤ radius+2
+    GT-->>Ag: bomb_attack_score (scalar)
+    Ag->>GT: compute_threat_zone_map(obs)
+    GT-->>Ag: threat_zone_map
+    end
+
+    rect rgb(255, 250, 230)
+    Note right of Ag: Bước 5 + RL inference
+    Ag->>Enc: encode_obs_enriched(utility, enemy_prob, threat, danger)
+    Enc-->>Ag: map_feat (13,13,13), aux_feat (6,)
+    Ag->>DQN: forward(map_feat, aux_feat)
+    DQN-->>Ag: q_values (6,)
+    end
+
+    rect rgb(245, 235, 255)
+    Note right of Ag: Bước 6-7 — Quyết định cuối
+    Ag->>FSM: get_phase_weights(obs, step)
+    Note over FSM: power_score = radius*1.5 + bombs*3<br/>FARMER / ZONER / ASSASSIN
+    FSM-->>Ag: weights {w_rl, w_gt, w_threat, w_bomb, w_survive}
+    Ag->>EX: expectimax_filter(q_values, maps, weights, safe_actions)
+    loop mỗi action ∈ safe_actions
+        Note over EX: combined = w_rl·q + w_gt·utility<br/>− w_threat·threat + w_bomb·bomb (chỉ action 5)<br/>+ w_survive·survivability(next_pos)
+    end
+    EX-->>Ag: final_action = argmax(combined)
+    end
+
+    Ag-->>Env: return final_action

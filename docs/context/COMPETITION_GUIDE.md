@@ -291,7 +291,7 @@ Ranking priority (tie-break):
 4. Update Google Sheets leaderboard.
 
 **Background Job (Continuous):**
-- Workers run continuously in cycles: each cycle runs **12 matches**, followed by a 10-second rest.
+- Workers run continuously in cycles: each cycle runs **5 matches**, followed by a 10-second rest.
 - Each match is sampled from the **Active Pool**, ensuring at least 1 student agent is involved.
 
 ### Active Pool

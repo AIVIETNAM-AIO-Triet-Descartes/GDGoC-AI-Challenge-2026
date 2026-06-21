@@ -1,0 +1,71 @@
+sequenceDiagram
+    autonumber
+    participant Tr as Training Loop
+    participant Env as Engine (BomberEnv)
+    participant Ag as TrainingAgent
+    participant GT as Danger + Game Theory Layers
+    participant Enc as encode_obs_enriched()
+    participant Pol as DQNModel (policy net)
+    participant Tgt as DQNModel (target net)
+    participant Buf as ReplayBuffer
+    participant Rw as compute_reward()
+
+    Note over Tr: init policy/target net, buffer, epsilon
+
+    loop mỗi episode
+        Tr->>Env: reset(seed)
+        Env-->>Tr: obs
+
+        loop mỗi step (đến khi done/truncated)
+            rect rgb(255, 250, 230)
+            Note right of Ag: Chọn action (explore vs exploit)
+            Tr->>Ag: select_action(obs, epsilon)
+            Ag->>GT: build danger_map + utility + enemy_prob + threat
+            GT-->>Ag: maps
+            Ag->>Enc: encode_obs_enriched(...)
+            Enc-->>Ag: map_feat (13,13,13), aux_feat (6,)
+            Ag->>Pol: forward(map_feat, aux_feat)
+            Pol-->>Ag: q_values (6,)
+            alt rand < epsilon
+                Note over Ag: explore — random safe action
+            else
+                Note over Ag: exploit — argmax q_values (mask safe_actions)
+            end
+            Ag-->>Tr: action
+            end
+
+            Tr->>Env: step(actions[4 players])
+            Env-->>Tr: next_obs, done, info
+
+            rect rgb(235, 255, 235)
+            Note right of Rw: Reward shaping (gốc + 3 thành phần MỚI)
+            Tr->>Rw: compute_reward(obs, next_obs, action, info)
+            Note over Rw: GỐC: win/kill/death/evasion/<br/>item/plant-near-box/approach/time<br/>MỚI: +0.5·trap_value (bomb attack)<br/>−0.08·threat_level<br/>+0.05·Δutility
+            Rw-->>Tr: reward
+            end
+
+            Tr->>Buf: push(state, action, reward, next_state, done)
+            Note over Tr: obs = next_obs
+
+            rect rgb(245, 235, 255)
+            Note right of Tr: Học (nếu buffer đủ lớn)
+            Tr->>Buf: sample(batch_size)
+            Buf-->>Tr: batch
+            Tr->>Pol: q = policy(state_b).gather(action_b)
+            Tr->>Tgt: q_next = target(next_state_b).max()
+            Note over Tr: target = reward + γ·q_next·(1-done)<br/>loss = MSE(q, target)
+            Tr->>Pol: backprop + optimizer.step()
+            end
+
+            opt mỗi target_sync_freq step
+                Tr->>Tgt: copy weights từ policy net
+            end
+        end
+
+        Tr->>Tr: decay epsilon
+        opt mỗi save_freq episode
+            Tr->>Pol: torch.save(state_dict) → model.pth
+        end
+    end
+
+    Note over Tr,Pol: Kết quả: model.pth → đóng gói cùng agent.py để submit
